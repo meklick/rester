@@ -8,6 +8,7 @@ const basePath = process.env.BASE_PATH ?? inferredBase;
 
 export default defineConfig({
   server: {
+    baseURL: basePath,
     prerender: {
       crawlLinks: true,
     },
