@@ -39,6 +39,9 @@ jobs:
         env:
           BASE_PATH: /rester-dev/
         run: pnpm build
+      - name: Disable Jekyll
+        working-directory: app
+        run: touch .output/public/.nojekyll
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
