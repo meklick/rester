@@ -13,7 +13,8 @@ export default defineConfig({
       crawlLinks: true,
     },
   },
+  // SolidStart's Vite type doesn't expose `base`, but Vite supports it.
   vite: {
-    base: basePath,
-  },
+    base: `${basePath}_build/`,
+  } as any,
 });
