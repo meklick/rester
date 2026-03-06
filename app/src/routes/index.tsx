@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, Show, onMount } from "solid-js";
 import type { Component } from "solid-js";
 import { isServer } from "solid-js/web";
 import poems from "~/data/poems.json";
@@ -54,6 +54,14 @@ const Home: Component = () => {
   const [index, setIndex] = createSignal(0);
 
   const poem = (): Poem => poems[order()[index()]];
+
+  onMount(() => {
+    // Re-randomize on every client visit so the pre-rendered seed is not reused
+    const freshSeed = makeSeed();
+    setSeed(freshSeed);
+    setOrder(shuffleWithSeed(poems.map((_, i) => i), freshSeed));
+    setIndex(0);
+  });
 
   const advance = () => {
     const next = index() + 1;
