@@ -21,6 +21,7 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  min-height: 100dvh; /* mobile browser address bar対応 */
   width: 100%;
   cursor: pointer;
   padding: 3rem 2rem;
@@ -30,6 +31,32 @@ body {
 .poem-container {
   max-width: 540px;
   width: 100%;
+}
+
+/* small mobile */
+@media (max-width: 480px) {
+  .screen {
+    padding: 2rem 1.25rem;
+    align-items: flex-start;
+    padding-top: max(3rem, 15vh);
+  }
+
+  .poem-body {
+    line-height: 2.2;
+    letter-spacing: 0.08em;
+    margin-bottom: 2rem;
+  }
+
+  .poem-author {
+    font-size: 0.8rem;
+  }
+}
+
+/* large desktop */
+@media (min-width: 1200px) {
+  .poem-body {
+    font-size: 1.8rem;
+  }
 }
 
 @keyframes ink-fade {
