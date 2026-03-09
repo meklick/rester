@@ -80,12 +80,17 @@ body {
 }
 
 .poem-body {
-  font-size: clamp(1.2rem, 3.5vw, 1.6rem);
+  font-size: clamp(0.85rem, 4vw, 1.6rem);
   line-height: 2.4;
   letter-spacing: 0.12em;
   text-align: center;
   margin-bottom: 2.5rem;
   font-weight: 400;
+}
+
+.poem-line {
+  display: block;
+  white-space: nowrap;
 }
 
 .poem-char {

@@ -79,23 +79,35 @@ const Home: Component = () => {
     <div class="screen" data-poem-seed={seed()} onClick={advance}>
       <Show keyed when={poem()}>
         {(currentPoem) => {
-          const bodyChars = Array.from(currentPoem.body);
-          const authorDelay = Math.min(bodyChars.length * 100 + 200, 5000);
+          const bodyCharCount = Array.from(currentPoem.body.replace(/\n/g, "")).length;
+          const authorDelay = Math.min(bodyCharCount * 100 + 200, 5000);
+
+          // Split into lines to render each line as a nowrap block
+          const lines = currentPoem.body.split("\n");
+          let charOffset = 0;
 
           return (
             <div class="poem-container">
               <p class="poem-body">
-                <For each={bodyChars}>
-                  {(char, charIndex) => {
-                    if (char === "\n") return <br />;
-                    const delayMs = Math.min(charIndex() * 100, 4800);
-                    return (
-                      <span class="poem-char" style={{ "animation-delay": `${delayMs}ms` }}>
-                        {char}
-                      </span>
-                    );
-                  }}
-                </For>
+                {lines.map((line) => {
+                  const lineChars = Array.from(line);
+                  const offset = charOffset;
+                  charOffset += lineChars.length;
+                  return (
+                    <span class="poem-line">
+                      <For each={lineChars}>
+                        {(char, i) => {
+                          const delayMs = Math.min((offset + i()) * 100, 4800);
+                          return (
+                            <span class="poem-char" style={{ "animation-delay": `${delayMs}ms` }}>
+                              {char}
+                            </span>
+                          );
+                        }}
+                      </For>
+                    </span>
+                  );
+                })}
               </p>
               <p class="poem-author" style={{ "animation-delay": `${authorDelay}ms` }}>
                 — {currentPoem.author}
