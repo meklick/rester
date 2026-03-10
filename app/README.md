@@ -5,7 +5,7 @@
 没後70年以上経過したパブリックドメインの詩・短歌をランダムに1首ずつ表示します。
 画面をクリック（またはタップ）すると次の作品へ進みます。
 
-**公開URL**: https://meklick.github.io/rester-dev/
+**公開URL**: https://meklick.github.io/rester/
 
 ---
 

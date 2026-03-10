@@ -37,7 +37,7 @@ jobs:
       - name: Build
         working-directory: app
         env:
-          BASE_PATH: /rester-dev/
+          BASE_PATH: /rester/
         run: pnpm build
       - name: Disable Jekyll
         working-directory: app

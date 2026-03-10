@@ -75,9 +75,9 @@
 
 **A: git remote から自動確認済み**
 
-- リモートURL: `git@github.com:meklick/rester-dev.git`
-- GitHub Pages URL: `https://meklick.github.io/rester-dev/`
-- base path: `/rester-dev/`
+- リモートURL: `git@github.com:meklick/rester.git`
+- GitHub Pages URL: `https://meklick.github.io/rester/`
+- base path: `/rester/`
 
 ---
 

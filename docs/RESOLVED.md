@@ -3,7 +3,7 @@
 ## 白画面問題：SSR/CSR シード同期 + GitHub Pages デプロイ
 
 ### 症状
-- ローカルおよび GitHub Pages (`https://meklick.github.io/rester-dev/`) で白画面が表示される
+- ローカルおよび GitHub Pages (`https://meklick.github.io/rester/`) で白画面が表示される
 - `curl http://localhost:3000/` のレスポンスに `<!--!$e000000--><!--!$/e000000-->` が含まれ、詩のコンテンツが空
 
 ### 原因（複数）
@@ -19,11 +19,11 @@
 - Docker ビルドが `ERR_PNPM_OUTDATED_LOCKFILE` で失敗していた
 
 #### 3. Router の `base` prop 未設定（GitHub Pages）
-GitHub Pages では `BASE_PATH=/rester-dev/` でビルドするが、`Router` に `base` を渡していなかったため、
-クライアントサイドのルーティングが `/rester-dev/` 配下を正しく処理できなかった。
+GitHub Pages では `BASE_PATH=/rester/` でビルドするが、`Router` に `base` を渡していなかったため、
+クライアントサイドのルーティングが `/rester/` 配下を正しく処理できなかった。
 
 #### 4. `vite.base` の設定不整合
-アセット URL を GitHub Pages 用に `/rester-dev/_build/assets/...` にするには `vite.base` の設定が必要だが、
+アセット URL を GitHub Pages 用に `/rester/_build/assets/...` にするには `vite.base` の設定が必要だが、
 設定値が不適切でプリレンダリング時の SSR を壊していた。
 
 ### 対応
@@ -77,7 +77,7 @@ curl -s http://localhost:3000/ | grep -o "e000000"
 grep -c "poem-body" app/.output/public/index.html
 
 # GitHub Pages 用ビルドのアセット URL 確認
-BASE_PATH=/rester-dev/ pnpm --dir app build
+BASE_PATH=/rester/ pnpm --dir app build
 grep -o 'src="[^"]*"' app/.output/public/index.html
 ```
 
