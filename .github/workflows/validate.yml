@@ -2,18 +2,33 @@ name: Validate Poems
 
 on:
   pull_request:
-    paths:
-      - "app/src/data/poems.json"
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if poems.json was modified
+        id: changed
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "app/src/data/poems.json"; then
+            echo "modified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "modified=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip validation (poems.json not modified)
+        if: steps.changed.outputs.modified == 'false'
+        run: echo "poems.json was not modified. Skipping validation."
 
       - uses: actions/setup-node@v4
+        if: steps.changed.outputs.modified == 'true'
         with:
           node-version: 22
 
       - name: Validate poems.json
+        if: steps.changed.outputs.modified == 'true'
         run: node scripts/validate-poems.mjs
