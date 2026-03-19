@@ -1,0 +1,121 @@
+name: Add Poem Public Domain Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "app/src/data/poems.json"
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  public-domain-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Anthropic SDK
+        run: npm install @anthropic-ai/sdk
+
+      - name: Run public domain check
+        id: check
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          output="$(node scripts/check-public-domain.mjs 2>&1)"
+          exit_code=$?
+          set -e
+
+          result="$(printf '%s\n' "$output" | tail -n 1)"
+          if [ -z "$result" ]; then
+            result='{"ok":false,"all_passed":false,"checks":[],"error":"No JSON output from check-public-domain.mjs"}'
+          fi
+
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "POEM_CHECK_RESULT=$result" >> "$GITHUB_ENV"
+          exit "$exit_code"
+
+      - name: Comment results on PR
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CHECK_RESULT: ${{ steps.check.outputs.result }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const raw = process.env.CHECK_RESULT || '{}';
+            let result;
+            try {
+              result = JSON.parse(raw);
+            } catch (e) {
+              result = { all_passed: false, checks: [], error: `Failed to parse check output: ${e.message}` };
+            }
+
+            const checks = Array.isArray(result.checks) ? result.checks : [];
+            const statusLabel = (status) => {
+              if (status === 'public_domain') return '✅ Public Domain';
+              if (status === 'not_public_domain') return '❌ Not Public Domain';
+              return '⚠️ Unknown';
+            };
+
+            const rows = checks.length > 0
+              ? checks.map((c) => `| ${c.author ?? 'N/A'} | ${c.death_year ?? 'Unknown'} | ${statusLabel(c.status)} |`).join('\n')
+              : '| N/A | N/A | No new poems added |';
+
+            const summary = [
+              '## Public Domain Verification Results',
+              '',
+              '| Author | Death Year | Status |',
+              '| --- | --- | --- |',
+              rows,
+              ''
+            ];
+
+            if (result.error) {
+              summary.push(`Error: ${result.error}`);
+            }
+
+            if (result.all_passed) {
+              summary.push('All newly added poems are public domain under the configured rule.');
+
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: ['public-domain-verified']
+              });
+            } else {
+              summary.push('One or more newly added poems are not verified as public domain.');
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: summary.join('\n')
+            });
+
+      - name: Enable auto-merge
+        if: ${{ fromJSON(steps.check.outputs.result).all_passed == true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto
+
+      - name: Fail workflow when check fails
+        if: ${{ fromJSON(steps.check.outputs.result).all_passed != true }}
+        run: |
+          echo "Public domain verification failed."
+          exit 1
