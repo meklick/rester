@@ -126,7 +126,7 @@ jobs:
       - name: Enable auto-merge
         if: steps.changed.outputs.modified == 'true' && fromJSON(steps.check.outputs.result).all_passed == true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto
 
       - name: Fail workflow when check fails
