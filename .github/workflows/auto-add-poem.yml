@@ -65,7 +65,7 @@ jobs:
       - name: Create branch, commit, and open PR
         if: ${{ fromJSON(steps.suggest.outputs.result).added == true }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
           RESULT: ${{ steps.suggest.outputs.result }}
         run: |
           set -euo pipefail
