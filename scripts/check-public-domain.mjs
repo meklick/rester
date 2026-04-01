@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
 const FILE_PATH = "app/src/data/poems.json";
 const CURRENT_YEAR = 2026;
 const PUBLIC_DOMAIN_THRESHOLD_YEARS = 70;
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "gpt-4o-mini";
 const SYSTEM_PROMPT =
   "You are a literary historian specializing in Japanese poetry. Answer questions about Japanese poets' biographical information concisely and accurately.";
 
@@ -65,18 +65,17 @@ function extractJsonObject(text) {
 async function fetchDeathYear(client, author) {
   const userPrompt = `What year did ${author} die? Reply with ONLY a JSON object like: {\"death_year\": 1902} or {\"death_year\": null} if unknown or still living.`;
 
-  const response = await client.messages.create({
+  const response = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 128,
     temperature: 0,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userPrompt }],
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
   });
 
-  const text = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
+  const text = (response.choices[0].message.content ?? "");
 
   const parsed = extractJsonObject(text);
   if (!parsed || !("death_year" in parsed)) {
@@ -113,7 +112,7 @@ function findNewPoems(beforePoems, afterPoems) {
 async function main() {
   const baseSha = process.env.GITHUB_BASE_SHA || "HEAD~1";
   const headSha = process.env.GITHUB_HEAD_SHA || "HEAD";
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GITHUB_TOKEN;
 
   const beforePoems = parsePoems(gitShow(baseSha), `${baseSha}:${FILE_PATH}`);
   const afterRaw = gitShow(headSha);
@@ -140,10 +139,10 @@ async function main() {
   }
 
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is required when new poems are added");
+    throw new Error("GITHUB_TOKEN is required when new poems are added");
   }
 
-  const client = new Anthropic({ apiKey });
+  const client = new OpenAI({ baseURL: "https://models.inference.ai.azure.com", apiKey });
   const checks = [];
 
   for (const poem of newPoems) {

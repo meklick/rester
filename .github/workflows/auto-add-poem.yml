@@ -38,13 +38,13 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Anthropic SDK
-        run: npm install @anthropic-ai/sdk
+      - name: Install OpenAI SDK
+        run: npm install openai
 
       - name: Suggest poem
         id: suggest
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GENRE_FILTER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.genre != 'any' && github.event.inputs.genre || '' }}
         run: |
           set +e
