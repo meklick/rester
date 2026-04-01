@@ -83,6 +83,83 @@ grep -o 'src="[^"]*"' app/.output/public/index.html
 
 ---
 
+## GitHub Models API: `models: read` 権限が必要
+
+### 症状
+
+GitHub Actions で GitHub Models API（`models.inference.ai.azure.com`）を呼び出すと以下のエラーが発生する:
+
+```
+AuthenticationError: 401 The `models` permission is required to access this endpoint
+```
+
+### 原因
+
+`GITHUB_TOKEN` はワークフローで `permissions` を明示した場合、宣言した権限のみが付与される。`models: read` を宣言していないと GitHub Models API へのアクセスが拒否される。
+
+### 対応
+
+ワークフローの `permissions` に `models: read` を追加する:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+  models: read
+```
+
+### 一次ソース
+
+- **公式発表（Changelog）**: https://github.blog/changelog/2025-05-15-modelsread-now-required-for-github-models-access/
+- **GITHUB_TOKEN の権限設定**: https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/controlling-permissions-for-github_token
+- **GitHub Models クイックスタート**: https://docs.github.com/en/github-models/quickstart
+
+---
+
+## GITHUB_TOKEN で作成した PR でワークフローが起動しない
+
+### 症状
+
+`auto-add-poem.yml` が `GITHUB_TOKEN` を使って PR を作成しても、`pull_request` イベントがトリガーされず `public-domain-check` や `validate` ワークフローが動作しない。
+
+### 原因
+
+GitHub の仕様で、`GITHUB_TOKEN` による操作は `pull_request` などのイベントを発火しない。無限ループ防止のためのセキュリティ制限。
+
+### 対応
+
+PR 作成に Personal Access Token (PAT) を使用する。
+
+1. GitHub の **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens** で PAT を作成
+   - Repository access: 対象リポジトリのみ
+   - Permissions: `Contents: Read and Write`、`Pull requests: Read and Write`
+2. リポジトリの **Settings** → **Secrets and variables** → **Actions** に `GH_PAT` として登録
+3. `auto-add-poem.yml` の PR 作成ステップで `GH_TOKEN: ${{ secrets.GH_PAT }}` を使用
+
+PAT で作成した PR は通常のユーザー操作と同等に扱われ、`pull_request` イベントが発火する。
+
+---
+
+## GitHub Actions が PR を作成できない
+
+### 症状
+
+`gh pr create` 実行時に以下のエラーが発生する:
+
+```
+pull request create failed: GraphQL: GitHub Actions is not permitted to create or approve pull requests (createPullRequest)
+```
+
+### 原因
+
+リポジトリの Actions 設定でデフォルトの **GitHub Actions による PR 作成・承認が無効** になっている。
+
+### 対応
+
+リポジトリの **Settings** → **Actions** → **General** → **Workflow permissions** セクションで、**Allow GitHub Actions to create and approve pull requests** にチェックを入れて **Save**。
+
+---
+
 ## npm run tsc` 実行時に型定義エラーが大量に発生する。
 
 ### 原因
