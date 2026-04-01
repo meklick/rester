@@ -174,5 +174,13 @@
     "year": 1940,
     "genre": "詩",
     "source": null
+  },
+  {
+    "id": "023",
+    "body": "さびしさに　宿を立ちいでて　ながむれば\nいづくも同じ　秋の夕暮れ",
+    "author": "松尾芭蕉",
+    "year": null,
+    "genre": "俳句",
+    "source": null
   }
 ]
