@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
 const FILE_PATH = "app/src/data/poems.json";
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "gpt-4o-mini";
 const MAX_ATTEMPTS = 3;
 const SYSTEM_PROMPT =
   "You are a Japanese literary expert. Your task is to suggest a public domain Japanese poem or waka that is NOT already in the provided collection. The author MUST have died before 1956 (70+ years ago from 2026). Respond ONLY with a valid JSON object.";
@@ -16,11 +16,7 @@ function normalizeBody(text) {
 }
 
 function extractText(response) {
-  return response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
+  return (response.choices[0].message.content ?? "").trim();
 }
 
 function parseJsonObject(raw) {
@@ -63,9 +59,9 @@ function validatePoemShape(poem) {
 }
 
 async function main() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GITHUB_TOKEN;
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is required");
+    throw new Error("GITHUB_TOKEN is required");
   }
 
   const genreFilter = (process.env.GENRE_FILTER || "").trim();
@@ -83,7 +79,7 @@ async function main() {
   const nextId = String(maxId + 1).padStart(3, "0");
 
   const existingBodies = new Set(poems.map((p) => normalizeBody(p?.body)));
-  const client = new Anthropic({ apiKey });
+  const client = new OpenAI({ baseURL: "https://models.inference.ai.azure.com", apiKey });
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     const genreInstruction = genreFilter ? ` Please suggest a ${genreFilter} specifically.` : "";
@@ -95,12 +91,14 @@ async function main() {
       "Reply with ONLY a JSON object with these fields: body (string, use \\n for line breaks), author (string, Japanese name), year (number or null), genre (one of: 俳句, 短歌, 詩, or null), source (string or null). Do NOT include the id field.",
     ].join("\n");
 
-    const response = await client.messages.create({
+    const response = await client.chat.completions.create({
       model: MODEL,
       max_tokens: 1200,
       temperature: 0.4,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
     });
 
     const text = extractText(response);
@@ -118,7 +116,7 @@ async function main() {
 
     if (existingBodies.has(normalizeBody(candidate.body))) {
       if (attempt === MAX_ATTEMPTS) {
-        console.log(JSON.stringify({ added: false, reason: "Claude suggested duplicate body 3 times" }));
+        console.log(JSON.stringify({ added: false, reason: "Model suggested duplicate body 3 times" }));
         process.exit(0);
       }
       continue;
