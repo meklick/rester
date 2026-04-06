@@ -182,5 +182,13 @@
     "year": null,
     "genre": "俳句",
     "source": null
+  },
+  {
+    "id": "024",
+    "body": "春の雪　降りしきる中に　君を待つ\nひとしずくの　涙をこぼす",
+    "author": "佐藤春夫",
+    "year": 1921,
+    "genre": "詩",
+    "source": null
   }
 ]
