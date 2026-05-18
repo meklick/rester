@@ -206,5 +206,13 @@
     "year": null,
     "genre": "俳句",
     "source": null
+  },
+  {
+    "id": "027",
+    "body": "あかあかと　日は昇りゆく　山の端に\n白き雲あり　青き空あり",
+    "author": "高村光太郎",
+    "year": 1918,
+    "genre": "詩",
+    "source": null
   }
 ]
