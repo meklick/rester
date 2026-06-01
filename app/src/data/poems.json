@@ -222,5 +222,13 @@
     "year": 1927,
     "genre": "短歌",
     "source": null
+  },
+  {
+    "id": "029",
+    "body": "春の海　ひねもすのたり　のたりかな\n波の音に　心やすらぐ\nこのひととき",
+    "author": "与謝蕪村",
+    "year": null,
+    "genre": "俳句",
+    "source": null
   }
 ]
