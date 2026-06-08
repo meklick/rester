@@ -230,5 +230,13 @@
     "year": null,
     "genre": "俳句",
     "source": null
+  },
+  {
+    "id": "030",
+    "body": "山桜　花の下にて　君を待つ\nひとしずくの　涙をこぼす",
+    "author": "佐藤春夫",
+    "year": 1921,
+    "genre": "詩",
+    "source": null
   }
 ]
