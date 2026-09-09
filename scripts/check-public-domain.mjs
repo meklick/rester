@@ -10,6 +10,7 @@ function gitShow(ref, path) {
     return execFileSync("git", ["show", `${ref}:${path}`], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 20 * 1024 * 1024,
     });
   } catch {
     return null;

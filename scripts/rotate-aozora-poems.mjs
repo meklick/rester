@@ -44,6 +44,38 @@ function shuffled(records, seed) {
   return result;
 }
 
+function selectBalanced(candidates, count, seed) {
+  const recordsByAuthor = new Map();
+
+  for (const record of candidates) {
+    const records = recordsByAuthor.get(record.author) ?? [];
+    records.push(record);
+    recordsByAuthor.set(record.author, records);
+  }
+
+  const authors = shuffled([...recordsByAuthor.keys()].sort(), `${seed}:authors`);
+  for (const author of authors) {
+    recordsByAuthor.set(author, shuffled(recordsByAuthor.get(author), `${seed}:${author}`));
+  }
+
+  const selection = [];
+  while (selection.length < count) {
+    let selectedThisRound = 0;
+
+    for (const author of authors) {
+      const record = recordsByAuthor.get(author).pop();
+      if (!record) continue;
+      selection.push(record);
+      selectedThisRound++;
+      if (selection.length === count) return selection;
+    }
+
+    if (selectedThisRound === 0) break;
+  }
+
+  throw new Error(`Not enough author-balanced Aozora records: need ${count}, found ${selection.length}.`);
+}
+
 function isEligible(record) {
   return (
     record &&
@@ -83,7 +115,7 @@ function main() {
     );
   }
 
-  const selection = shuffled(candidates, `${month}:${attempt}`).slice(0, currentPoems.length);
+  const selection = selectBalanced(candidates, currentPoems.length, `${month}:${attempt}`);
   const poems = selection.map((record, index) => ({
     id: String(index + 1).padStart(3, "0"),
     body: record.body,
@@ -97,7 +129,7 @@ function main() {
 
   writeFileSync(POEMS_PATH, `${JSON.stringify(poems, null, 2)}\n`, "utf8");
   console.log(
-    `Selected ${poems.length} public-domain poems from the Aozora catalog for ${month} (attempt ${attempt}).`,
+    `Selected ${poems.length} author-balanced public-domain poems from the Aozora catalog for ${month} (attempt ${attempt}).`,
   );
 }
 
