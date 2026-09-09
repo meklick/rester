@@ -7,7 +7,6 @@ on:
 permissions:
   pull-requests: write
   contents: write
-  models: read
 
 jobs:
   public-domain-check:
@@ -36,16 +35,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install OpenAI SDK
-        if: steps.changed.outputs.modified == 'true'
-        run: npm install openai
-
       - name: Run public domain check
         if: steps.changed.outputs.modified == 'true'
         id: check
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |

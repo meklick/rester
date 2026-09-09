@@ -19,7 +19,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  models: read
 
 concurrency:
   group: monthly-poem-rotation
@@ -43,22 +42,18 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install OpenAI SDK
-        run: npm install --no-save openai
-
-      - name: Generate and validate a replacement poem set
+      - name: Select and validate a replacement poem set
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROTATION_ATTEMPT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.retry_attempt || '0' }}
         run: |
           set -uo pipefail
 
           max_attempts=3
           for attempt in $(seq 1 "$max_attempts"); do
-            echo "Generating replacement set: attempt ${attempt}/${max_attempts}"
+            echo "Selecting replacement set: attempt ${attempt}/${max_attempts}"
             git restore --source=HEAD -- app/src/data/poems.json
 
-            if node scripts/replace-poems.mjs && node scripts/validate-poems.mjs; then
+            if ROTATION_ATTEMPT="$(( ROTATION_ATTEMPT + attempt - 1 ))" node scripts/rotate-aozora-poems.mjs && node scripts/validate-poems.mjs; then
               echo "Replacement set passed validation on attempt ${attempt}."
               exit 0
             fi

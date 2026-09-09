@@ -1,64 +1,67 @@
 # 詩コンテンツの運用フロー
 
-Rester の詩データは、手動で1件追加する方法と、月替わりでコレクション全体を更新する方法で管理します。どちらも PR 作成後にパブリックドメイン確認と JSON 形式チェックを実行します。
+Rester は青空文庫の公開ドメイン作品を、リポジトリ内の検証済みカタログから選んで表示します。外部の生成AIや推論APIは使いません。
 
 ```
-手動で1件追加 ───────┐
-                      ├──► PR ──► 形式・著作権確認 ──► マージ ──► Pages デプロイ
-月次の総入れ替え ────┘
+青空文庫の作品カードを人が確認
+              │
+              ▼
+content/aozora-catalog.json（来歴・没年付き）
+              │
+              ▼
+月次Action ──► app/src/data/poems.json（同数だけ置換）
+              │
+              ▼
+PRの全件検証 ──► 人の確認・マージ ──► Pages デプロイ
 ```
 
 ## 月次の総入れ替え
 
-`.github/workflows/auto-replace-poems.yml` は、毎月1日 09:00 JST（UTC 00:00）に実行されます。現在のコレクションと**同じ件数**の新しい候補セットを生成し、`poems.json` を丸ごと置き換える PR を作成します。つまり、35件なら旧35件を削除して新35件だけをコミットするため、リポジトリと GitHub Pages の公開ファイルは増え続けません。
+`.github/workflows/auto-replace-poems.yml` は毎月1日 09:00 JST（UTC 00:00）に動きます。手動では GitHub Actions の **Monthly Poem Rotation** から実行できます。
 
-手動実行も可能です。GitHub Actions の **Monthly Poem Rotation** から実行しても、実行時点の件数を維持します。
+処理は次のとおりです。
 
-### 処理内容
+1. `scripts/rotate-aozora-poems.mjs` が現在の `poems.json` の件数を読み取る。
+2. `content/aozora-catalog.json` から、没年が `実行年 - 71` 以下のレコードだけを対象にする。
+3. 現在表示中の `source_record_id` を除外し、同じ件数を決定的な順序で選ぶ。
+4. `poems.json` を選んだ件数だけで書き直す。35件なら旧35件はすべて削除され、新35件だけが残る。
+5. `scripts/validate-poems.mjs` が全作品の ID・本文・作者・年・ジャンル・出典・図書カードURL・重複を検証する。
+6. 成功時だけ月次PRを作る。`content/` はフロントエンドに読み込まないため、Pages に公開される詩データは常に `poems.json` の同数だけで、ファイルサイズが増え続けない。
 
-1. `scripts/replace-poems.mjs` が候補セットを生成する
-   - プロジェクトの公開ドメイン基準を満たすことを事前確認した著者リストだけを使用する
-   - 既存セットと同じ本文、または新しいセット内で重複する本文は採用しない
-   - 本文・著者・ジャンル・出典が揃わない候補は再試行し、全件を揃えられなければ PR を作成しない
-2. `scripts/validate-poems.mjs` が全作品の ID形式・本文・著者・年・ジャンル・出典・ID/本文重複を確認する
-   - 検証に失敗した場合は、候補セット全体を破棄して最初から生成し直す
-   - 最大3回失敗した場合は PR を作成せず、ワークフローを失敗として終了する
-3. `auto/replace-poems-<UTCタイムスタンプ>` ブランチにコミットして PR を作成する
-4. `add-poem.yml` が、ID が再利用されている場合も含めて新規・変更された全作品の没年を確認する
-   - この検証に失敗した月次PRは閉じ、別の著者順で候補セット全体を作り直す
-   - 最大3セットで打ち切り、最後の失敗PRは確認用に残す
-5. `monthly-rotation` ラベル付き PR は、本文と出典を人が確認してからマージする。`deploy.yml` が GitHub Pages を更新する
+選定の種は年月と再試行番号です。同じ月の最初の実行は再現可能で、形式検証に失敗した場合は候補セット全体を捨て、異なる再試行番号で最大3回選び直します。
 
-生成モデルの出力は、作品本文・出典の正確さを完全には保証できません。マージ前に PR の本文と出典を確認してください。
+## Pull Request での公開ドメイン検証
 
-## 手動で1件追加
+`add-poem.yml` は `poems.json` が変わった全PRで `scripts/check-public-domain.mjs` を動かします。ID が月次で再利用されても、本文を含むレコード全体の差分で判定するため、総入れ替えの全件を検証します。
 
-`.github/workflows/auto-add-poem.yml` はスケジュール実行を持たず、GitHub Actions の **Auto Add Poem** からの手動実行専用です。`genre` を指定すると、俳句・短歌・詩に絞れます。
+各変更作品について、次をすべて確認します。
 
-リポジトリを直接編集して PR を作る場合は、[CONTRIBUTING.md](../CONTRIBUTING.md) の入力ルールに従ってください。
+- `source_record_id` がカタログに存在すること
+- 本文、作者、年、ジャンル、出典、`source_url` がカタログと完全に一致すること
+- カタログに記録された没年が `実行年 - 71` 以下であること
 
-## パブリックドメイン判定
+いずれかが失敗するとPRに結果をコメントします。`monthly-rotation` ラベルのPRでは、失敗したPRを閉じ、最大3セットまで月次Actionを再実行します。最後の失敗PRは確認用に残ります。検証に通った月次PRも自動マージせず、作品内容と出典は人が確認してからマージします。
 
-日本の著作権法では、原則として著作者の死後70年が経過するまで著作権が存続し、期間は死亡年の翌年1月1日から数えます。したがって、年 `Y` に掲載できる目安は `死亡年 <= Y - 71` です。たとえば2026年は1955年以前に没した著者が対象です。[著作権法第51条・第57条](https://laws.e-gov.go.jp/law/345AC0000000048) に基づく運用です。
+## 青空文庫の出典と扱い
 
-`scripts/check-public-domain.mjs` は実行年からこの境界年を計算します。著者の没年が不明、または境界年より新しい場合はチェックを失敗させます。
+青空文庫の[利用条件](https://www.aozora.gr.jp/guide/kijyunn.html)では、著作権が消滅した作品は複製・再配布・共有・形式変更が可能とされています。一方で、元資料や入力・校正者などの情報を残すよう求められています。そのためカタログと表示データの双方に作品カードURLを残します。
+
+青空文庫は作品カードURLを安定した参照先として案内しており、テキストファイルURLの末尾の番号は更新される場合があります。[FAQ](https://www.aozora.gr.jp/guide/aozora_bunko_faq.html)の説明に従い、PRレビューでは `source_url` の作品カードを一次資料として確認してください。
 
 ## 関連ファイル
 
 | ファイル | 役割 |
 | --- | --- |
-| `.github/workflows/auto-replace-poems.yml` | 月次の総入れ替えを実行して PR を作成する |
-| `.github/workflows/auto-add-poem.yml` | 手動の1件追加を実行して PR を作成する |
-| `.github/workflows/add-poem.yml` | PR 内の新規・変更作品の公開ドメインを確認する |
-| `.github/workflows/validate.yml` | PR 時の JSON 形式を検証する |
-| `scripts/replace-poems.mjs` | 月次の候補セットを生成する |
-| `scripts/suggest-poem.mjs` | 手動の1件候補を生成する |
-| `scripts/check-public-domain.mjs` | 新規・変更作品の没年を確認する |
+| `content/aozora-catalog.json` | 青空文庫の来歴と没年を含む、非公開の選定用カタログ |
+| `scripts/import-aozora-catalog.mjs` | 初期カタログを青空文庫由来テキストから再作成する |
+| `scripts/rotate-aozora-poems.mjs` | カタログから同数を選び、表示用データを総入れ替えする |
+| `scripts/validate-poems.mjs` | 表示用データの全件形式を検証する |
+| `scripts/check-public-domain.mjs` | 変更レコードのカタログ一致と没年を検証する |
+| `.github/workflows/auto-replace-poems.yml` | 月次の総入れ替えPRを作成する |
+| `.github/workflows/add-poem.yml` | PRの公開ドメイン検証と失敗時の再実行を行う |
 
 ## 必要なリポジトリ設定
 
-- `GH_PAT`: 自動作成 PR が `pull_request` ワークフローを起動し、失敗時に月次ワークフローを再実行するための Fine-grained PAT。対象リポジトリに `Contents: Read and write`、`Pull requests: Read and write`、`Actions: Read and write` を付与する。
+- `GH_PAT`: 自動作成PRが `pull_request` ワークフローを起動し、失敗時に月次Actionを再実行するための Fine-grained PAT。対象リポジトリに `Contents: Read and write`、`Pull requests: Read and write`、`Actions: Read and write` を付与する。
 - Actions の **Workflow permissions**: 書き込みを許可し、**Allow GitHub Actions to create and approve pull requests** を有効にする。
 - ブランチ保護: `main` に `public-domain-check` と `validate` を必須チェックとして設定する。
-
-GitHub Models API を使うワークフローには `models: read` 権限が必要です。

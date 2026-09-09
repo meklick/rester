@@ -18,6 +18,7 @@ if (!Array.isArray(poems)) {
 
 const ids = new Set();
 const bodies = new Set();
+const sourceRecordIds = new Set();
 const validGenres = new Set(["俳句", "短歌", "詩", null]);
 let errors = 0;
 
@@ -53,6 +54,29 @@ for (const [i, poem] of poems.entries()) {
   if (!(poem.source === null || typeof poem.source === "string")) {
     console.error(`❌ ${label} invalid field: source must be a string or null`);
     errors++;
+  }
+  if (typeof poem.source_record_id !== "string" || poem.source_record_id.trim() === "") {
+    console.error(`❌ ${label} missing or invalid field: source_record_id`);
+    errors++;
+  } else if (sourceRecordIds.has(poem.source_record_id)) {
+    console.error(`❌ ${label} duplicate source_record_id: ${poem.source_record_id}`);
+    errors++;
+  } else {
+    sourceRecordIds.add(poem.source_record_id);
+  }
+  if (typeof poem.source_url !== "string") {
+    console.error(`❌ ${label} missing or invalid field: source_url`);
+    errors++;
+  } else {
+    try {
+      const url = new URL(poem.source_url);
+      if (url.protocol !== "https:" || !["aozora.gr.jp", "www.aozora.gr.jp"].includes(url.hostname)) {
+        throw new Error("not an Aozora Bunko HTTPS URL");
+      }
+    } catch {
+      console.error(`❌ ${label} invalid field: source_url must be an Aozora Bunko HTTPS URL`);
+      errors++;
+    }
   }
   if (typeof poem.id === "string" && ids.has(poem.id)) {
     console.error(`❌ ${label} duplicate id: ${poem.id}`);
