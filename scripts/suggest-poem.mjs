@@ -4,8 +4,11 @@ import OpenAI from "openai";
 const FILE_PATH = "app/src/data/poems.json";
 const MODEL = "gpt-4o-mini";
 const MAX_ATTEMPTS = 3;
+const CURRENT_YEAR = new Date().getUTCFullYear();
+// Copyright terms begin on January 1 of the year after an author's death.
+const LATEST_PUBLIC_DOMAIN_DEATH_YEAR = CURRENT_YEAR - 71;
 const SYSTEM_PROMPT =
-  "You are a Japanese literary expert. Your task is to suggest a public domain Japanese poem or waka that is NOT already in the provided collection. The author MUST have died before 1956 (70+ years ago from 2026). Respond ONLY with a valid JSON object.";
+  "You are a Japanese literary expert. Your task is to suggest a public domain Japanese poem or waka that is NOT already in the provided collection. Respond ONLY with a valid JSON object.";
 
 function normalizeBody(text) {
   return String(text ?? "")
@@ -87,7 +90,7 @@ async function main() {
       "Current collection JSON:",
       JSON.stringify(poems, null, 2),
       "",
-      `Please suggest one Japanese poem or waka for the collection. The author must have died before 1956.${genreInstruction}`,
+      `Please suggest one Japanese poem or waka for the collection. The author must have died in or before ${LATEST_PUBLIC_DOMAIN_DEATH_YEAR}.${genreInstruction}`,
       "Reply with ONLY a JSON object with these fields: body (string, use \\n for line breaks), author (string, Japanese name), year (number or null), genre (one of: 俳句, 短歌, 詩, or null), source (string or null). Do NOT include the id field.",
     ].join("\n");
 

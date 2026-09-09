@@ -1,149 +1,64 @@
-# 詩追加ワークフロー
+# 詩コンテンツの運用フロー
 
-このドキュメントは、Rester に詩を追加する際の自動化ワークフローを説明します。
-
-## 概要
-
-詩の追加は**手動**（プルリクエスト）と**自動**（スケジュール実行）の2通りあります。どちらの場合もマージ前にパブリックドメイン検証が自動で実行されます。
+Rester の詩データは、手動で1件追加する方法と、月替わりでコレクション全体を更新する方法で管理します。どちらも PR 作成後にパブリックドメイン確認と JSON 形式チェックを実行します。
 
 ```
-手動PR  ──┐
-           ├──► add-poem.yml（パブリックドメイン確認）──► 自動マージ
-自動選択 ──┘
+手動で1件追加 ───────┐
+                      ├──► PR ──► 形式・著作権確認 ──► マージ ──► Pages デプロイ
+月次の総入れ替え ────┘
 ```
 
----
+## 月次の総入れ替え
 
-## 全自動フロー
+`.github/workflows/auto-replace-poems.yml` は、毎月1日 09:00 JST（UTC 00:00）に実行されます。現在のコレクションと**同じ件数**の新しい候補セットを生成し、`poems.json` を丸ごと置き換える PR を作成します。つまり、35件なら旧35件を削除して新35件だけをコミットするため、リポジトリと GitHub Pages の公開ファイルは増え続けません。
 
-### トリガー
+手動実行も可能です。GitHub Actions の **Monthly Poem Rotation** から実行しても、実行時点の件数を維持します。
 
-- **スケジュール**: 毎週月曜 09:00 UTC
-- **手動**: GitHub Actions UI から `workflow_dispatch` で実行（`genre` 入力で絞り込み可能: 俳句 / 短歌 / 詩 / any）
+### 処理内容
 
-### 処理の流れ
+1. `scripts/replace-poems.mjs` が候補セットを生成する
+   - プロジェクトの公開ドメイン基準を満たすことを事前確認した著者リストだけを使用する
+   - 既存セットと同じ本文、または新しいセット内で重複する本文は採用しない
+   - 本文・著者・ジャンル・出典が揃わない候補は再試行し、全件を揃えられなければ PR を作成しない
+2. `scripts/validate-poems.mjs` が全作品の ID形式・本文・著者・年・ジャンル・出典・ID/本文重複を確認する
+   - 検証に失敗した場合は、候補セット全体を破棄して最初から生成し直す
+   - 最大3回失敗した場合は PR を作成せず、ワークフローを失敗として終了する
+3. `auto/replace-poems-<UTCタイムスタンプ>` ブランチにコミットして PR を作成する
+4. `add-poem.yml` が、ID が再利用されている場合も含めて新規・変更された全作品の没年を確認する
+   - この検証に失敗した月次PRは閉じ、別の著者順で候補セット全体を作り直す
+   - 最大3セットで打ち切り、最後の失敗PRは確認用に残す
+5. `monthly-rotation` ラベル付き PR は、本文と出典を人が確認してからマージする。`deploy.yml` が GitHub Pages を更新する
 
-```
-auto-add-poem.yml
-  1. リポジトリをチェックアウト
-  2. scripts/suggest-poem.mjs を実行
-       - app/src/data/poems.json を読み込む
-       - Claude Sonnet (claude-sonnet-4-6) に詩を提案させる
-           - プロンプト: まだコレクションにない パブリックドメインの詩を提案
-           - 著者は 1956年以前に没している必要がある
-       - 重複チェック（最大3回リトライ）
-       - 新しい詩を poems.json に追記
-  3. 詩が追加された場合:
-       - ブランチ作成: auto/add-poem-<タイムスタンプ>
-       - コミット: feat: <著者>「<本文の先頭8文字>」を追加
-       - プッシュして PR を作成（ラベル: auto-generated）
-  4. 追加されなかった場合:
-       - 理由を出力して正常終了
+生成モデルの出力は、作品本文・出典の正確さを完全には保証できません。マージ前に PR の本文と出典を確認してください。
 
-  ↓ main ブランチへの PR が作成される
+## 手動で1件追加
 
-add-poem.yml  （PR 作成に反応して起動）
-  1. scripts/check-public-domain.mjs を実行
-       - poems.json のベース SHA とヘッド SHA を比較
-       - 新規追加された詩ごとに Claude Haiku (claude-haiku-4-5-20251001) を呼び出す
-           - 質問: <著者> は何年に亡くなりましたか？
-       - 判定: 2026 - 没年 >= 70
-  2. PR にコメントで結果テーブルを投稿:
-       | 著者 | 没年 | ステータス |
-  3. すべての詩がパスした場合:
-       - ラベル追加: public-domain-verified
-       - 自動マージ実行: gh pr merge --squash --auto
-  4. 1件でも失敗した場合:
-       - ワークフローを失敗させてマージをブロック
-```
+`.github/workflows/auto-add-poem.yml` はスケジュール実行を持たず、GitHub Actions の **Auto Add Poem** からの手動実行専用です。`genre` を指定すると、俳句・短歌・詩に絞れます。
 
----
+リポジトリを直接編集して PR を作る場合は、[CONTRIBUTING.md](../CONTRIBUTING.md) の入力ルールに従ってください。
 
-## 手動フロー
+## パブリックドメイン判定
 
-`app/src/data/poems.json` を直接編集して PR を作成します。自動フローと同様に `add-poem.yml` による検証が走ります。
+日本の著作権法では、原則として著作者の死後70年が経過するまで著作権が存続し、期間は死亡年の翌年1月1日から数えます。したがって、年 `Y` に掲載できる目安は `死亡年 <= Y - 71` です。たとえば2026年は1955年以前に没した著者が対象です。[著作権法第51条・第57条](https://laws.e-gov.go.jp/law/345AC0000000048) に基づく運用です。
 
-詩のスキーマや本文の書き方は [CONTRIBUTING.md](../CONTRIBUTING.md) を参照してください。
-
----
+`scripts/check-public-domain.mjs` は実行年からこの境界年を計算します。著者の没年が不明、または境界年より新しい場合はチェックを失敗させます。
 
 ## 関連ファイル
 
 | ファイル | 役割 |
-|----------|------|
-| `.github/workflows/auto-add-poem.yml` | スケジュール実行による詩の選択と PR 作成 |
-| `.github/workflows/add-poem.yml` | パブリックドメイン検証と自動マージ |
-| `.github/workflows/validate.yml` | PR 時の JSON スキーマ検証 |
-| `scripts/suggest-poem.mjs` | Claude Sonnet を使って新しい詩を選択 |
-| `scripts/check-public-domain.mjs` | Claude Haiku を使って著者の没年を確認 |
-| `app/src/data/poems.json` | 詩データ |
+| --- | --- |
+| `.github/workflows/auto-replace-poems.yml` | 月次の総入れ替えを実行して PR を作成する |
+| `.github/workflows/auto-add-poem.yml` | 手動の1件追加を実行して PR を作成する |
+| `.github/workflows/add-poem.yml` | PR 内の新規・変更作品の公開ドメインを確認する |
+| `.github/workflows/validate.yml` | PR 時の JSON 形式を検証する |
+| `scripts/replace-poems.mjs` | 月次の候補セットを生成する |
+| `scripts/suggest-poem.mjs` | 手動の1件候補を生成する |
+| `scripts/check-public-domain.mjs` | 新規・変更作品の没年を確認する |
 
----
+## 必要なリポジトリ設定
 
-## 事前設定
+- `GH_PAT`: 自動作成 PR が `pull_request` ワークフローを起動し、失敗時に月次ワークフローを再実行するための Fine-grained PAT。対象リポジトリに `Contents: Read and write`、`Pull requests: Read and write`、`Actions: Read and write` を付与する。
+- Actions の **Workflow permissions**: 書き込みを許可し、**Allow GitHub Actions to create and approve pull requests** を有効にする。
+- ブランチ保護: `main` に `public-domain-check` と `validate` を必須チェックとして設定する。
 
-| 項目 | 内容 |
-|------|------|
-| `ANTHROPIC_API_KEY` | GitHub リポジトリの Secrets に登録（両スクリプトで必須） |
-| ブランチ保護ルール | `main` に「ステータスチェック必須」を設定すると `--auto` マージが有効になる |
-
-### ブランチ保護ルールの設定手順
-
-#### 1. 設定画面を開く
-
-```
-リポジトリ → Settings → Branches → Add branch ruleset
-```
-
-（古い UI の場合は「Add rule」）
-
-#### 2. 対象ブランチを指定
-
-- **Branch name pattern**: `main`
-
-#### 3. 以下の項目を有効にする
-
-| 設定項目 | 目的 |
-|----------|------|
-| **Require a pull request before merging** | 直接プッシュを防ぐ（推奨） |
-| **Require status checks to pass before merging** | `--auto` マージに必須 |
-| └ **Require branches to be up to date before merging** | 合わせて有効化を推奨 |
-
-#### 4. ステータスチェックの追加
-
-「Require status checks」を有効にしたら、検索ボックスで以下を追加:
-
-- `public-domain-check`（`add-poem.yml` のジョブ名）
-- `validate`（`validate.yml` のジョブ名）
-
-> **注意**: ステータスチェックは一度でもそのワークフローが実行されないと候補に表示されません。最初の PR を手動でマージした後に設定するのが確実です。
-
-#### 5. 保存
-
-**Create** または **Save changes** をクリック。
-
-### `--auto` マージの仕組み
-
-```
-gh pr merge --squash --auto
-    ↓
-「保留中」状態でマージ待機
-    ↓
-required status checks が全部グリーンになったら
-    ↓
-GitHub が自動でマージ実行
-```
-
-ブランチ保護ルールなしだと `--auto` は即時マージになってしまうため、パブリックドメイン検証が完了する前にマージされる可能性があります。
-
----
-
-## パブリックドメインの判定基準
-
-日本の著作権法では、著作者の没後 **70年以上** 経過した作品がパブリックドメインとなります。
-
-```
-2026 - 没年 >= 70  →  没年 <= 1955
-```
-
-没年が不明な場合は `⚠️ 不明` と表示され、マージがブロックされます。
+GitHub Models API を使うワークフローには `models: read` 権限が必要です。

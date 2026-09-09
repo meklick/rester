@@ -124,10 +124,34 @@ jobs:
             });
 
       - name: Enable auto-merge
-        if: steps.changed.outputs.modified == 'true' && fromJSON(steps.check.outputs.result).all_passed == true
+        if: steps.changed.outputs.modified == 'true' && fromJSON(steps.check.outputs.result).all_passed == true && !contains(github.event.pull_request.labels.*.name, 'monthly-rotation')
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto
+
+      - name: Retry a failed monthly rotation
+        if: steps.changed.outputs.modified == 'true' && fromJSON(steps.check.outputs.result).all_passed != true && contains(github.event.pull_request.labels.*.name, 'monthly-rotation')
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$HEAD_REF" =~ ^auto/replace-poems-r([0-2])-[0-9]{8}-[0-9]{6}$ ]]; then
+            echo "Could not determine the monthly rotation retry number from ${HEAD_REF}."
+            exit 0
+          fi
+
+          retry_attempt="${BASH_REMATCH[1]}"
+          if (( retry_attempt >= 2 )); then
+            echo "The monthly rotation has already used all three attempts."
+            exit 0
+          fi
+
+          next_attempt=$((retry_attempt + 1))
+          gh workflow run auto-replace-poems.yml --ref main -f retry_attempt="$next_attempt"
+          gh pr close "$PR_NUMBER" --comment "公開ドメイン検証に失敗したため、総入れ替えを再実行しています（${next_attempt}/3回目）。"
 
       - name: Fail workflow when check fails
         if: steps.changed.outputs.modified == 'true' && fromJSON(steps.check.outputs.result).all_passed != true

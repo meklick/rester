@@ -2,8 +2,10 @@ import { execFileSync } from "node:child_process";
 import OpenAI from "openai";
 
 const FILE_PATH = "app/src/data/poems.json";
-const CURRENT_YEAR = 2026;
 const PUBLIC_DOMAIN_THRESHOLD_YEARS = 70;
+const CURRENT_YEAR = new Date().getUTCFullYear();
+// The 70-year term starts on January 1 after the death year.
+const LATEST_PUBLIC_DOMAIN_DEATH_YEAR = CURRENT_YEAR - PUBLIC_DOMAIN_THRESHOLD_YEARS - 1;
 const MODEL = "gpt-4o-mini";
 const SYSTEM_PROMPT =
   "You are a literary historian specializing in Japanese poetry. Answer questions about Japanese poets' biographical information concisely and accurately.";
@@ -92,21 +94,12 @@ async function fetchDeathYear(client, author) {
   return null;
 }
 
-function findNewPoems(beforePoems, afterPoems) {
-  const beforeIds = new Set(
-    beforePoems
-      .map((p) => (p && typeof p === "object" ? p.id : undefined))
-      .filter((id) => typeof id === "string")
-  );
-
+function findNewOrChangedPoems(beforePoems, afterPoems) {
   const beforeFingerprints = new Set(beforePoems.map((p) => stableStringify(p)));
 
-  return afterPoems.filter((poem) => {
-    if (poem && typeof poem === "object" && typeof poem.id === "string") {
-      return !beforeIds.has(poem.id);
-    }
-    return !beforeFingerprints.has(stableStringify(poem));
-  });
+  // IDs are intentionally reused by a monthly full replacement, so an ID-only
+  // comparison would incorrectly skip copyright checks for every new poem.
+  return afterPoems.filter((poem) => !beforeFingerprints.has(stableStringify(poem)));
 }
 
 async function main() {
@@ -122,7 +115,7 @@ async function main() {
   }
 
   const afterPoems = parsePoems(afterRaw, `${headSha}:${FILE_PATH}`);
-  const newPoems = findNewPoems(beforePoems, afterPoems);
+  const newPoems = findNewOrChangedPoems(beforePoems, afterPoems);
 
   if (newPoems.length === 0) {
     const result = {
@@ -167,7 +160,7 @@ async function main() {
     let isPublicDomain = false;
 
     if (deathYear !== null) {
-      isPublicDomain = CURRENT_YEAR - deathYear >= PUBLIC_DOMAIN_THRESHOLD_YEARS;
+      isPublicDomain = deathYear <= LATEST_PUBLIC_DOMAIN_DEATH_YEAR;
       status = isPublicDomain ? "public_domain" : "not_public_domain";
     }
 
@@ -188,7 +181,7 @@ async function main() {
     base_sha: baseSha,
     head_sha: headSha,
     current_year: CURRENT_YEAR,
-    minimum_death_year_for_pd: CURRENT_YEAR - PUBLIC_DOMAIN_THRESHOLD_YEARS,
+    latest_death_year_for_pd: LATEST_PUBLIC_DOMAIN_DEATH_YEAR,
     total_new_poems: newPoems.length,
     checks,
   };
