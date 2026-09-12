@@ -5,6 +5,9 @@ const POEMS_PATH = resolve("app/src/data/poems.json");
 const CATALOG_PATH = resolve("content/aozora-catalog.json");
 const CURRENT_YEAR = new Date().getUTCFullYear();
 const LATEST_PUBLIC_DOMAIN_DEATH_YEAR = CURRENT_YEAR - 71;
+const DISPLAY_POEM_COUNT = 100;
+const AUTHOR_COUNT = 10;
+const POEMS_PER_AUTHOR = DISPLAY_POEM_COUNT / AUTHOR_COUNT;
 const month = process.env.ROTATION_MONTH || new Date().toISOString().slice(0, 7);
 const attempt = process.env.ROTATION_ATTEMPT || "0";
 
@@ -54,7 +57,13 @@ function selectBalanced(candidates, count, seed) {
   }
 
   const authors = shuffled([...recordsByAuthor.keys()].sort(), `${seed}:authors`);
+  if (authors.length !== AUTHOR_COUNT) {
+    throw new Error(`Expected ${AUTHOR_COUNT} authors in the Aozora catalog, but found ${authors.length}.`);
+  }
   for (const author of authors) {
+    if (recordsByAuthor.get(author).length < POEMS_PER_AUTHOR) {
+      throw new Error(`Not enough eligible poems for ${author}: need ${POEMS_PER_AUTHOR}.`);
+    }
     recordsByAuthor.set(author, shuffled(recordsByAuthor.get(author), `${seed}:${author}`));
   }
 
@@ -109,13 +118,13 @@ function main() {
     .filter((record) => !currentRecordIds.has(record.source_record_id))
     .sort((a, b) => a.source_record_id.localeCompare(b.source_record_id, "en"));
 
-  if (candidates.length < currentPoems.length) {
+  if (candidates.length < DISPLAY_POEM_COUNT) {
     throw new Error(
-      `Not enough eligible Aozora records for a full replacement: need ${currentPoems.length}, found ${candidates.length}.`,
+      `Not enough eligible Aozora records for a full replacement: need ${DISPLAY_POEM_COUNT}, found ${candidates.length}.`,
     );
   }
 
-  const selection = selectBalanced(candidates, currentPoems.length, `${month}:${attempt}`);
+  const selection = selectBalanced(candidates, DISPLAY_POEM_COUNT, `${month}:${attempt}`);
   const poems = selection.map((record, index) => ({
     id: String(index + 1).padStart(3, "0"),
     body: record.body,
