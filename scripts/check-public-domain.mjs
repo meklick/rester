@@ -1,33 +1,35 @@
 import { execFileSync } from "node:child_process";
-import OpenAI from "openai";
 
-const FILE_PATH = "app/src/data/poems.json";
-const CURRENT_YEAR = 2026;
-const PUBLIC_DOMAIN_THRESHOLD_YEARS = 70;
-const MODEL = "gpt-4o-mini";
-const SYSTEM_PROMPT =
-  "You are a literary historian specializing in Japanese poetry. Answer questions about Japanese poets' biographical information concisely and accurately.";
+const POEMS_PATH = "app/src/data/poems.json";
+const CATALOG_PATH = "content/aozora-catalog.json";
+const CURRENT_YEAR = new Date().getUTCFullYear();
+const LATEST_PUBLIC_DOMAIN_DEATH_YEAR = CURRENT_YEAR - 71;
 
-function gitShow(ref) {
+function gitShow(ref, path) {
   try {
-    return execFileSync("git", ["show", `${ref}:${FILE_PATH}`], {
+    return execFileSync("git", ["show", `${ref}:${path}`], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 20 * 1024 * 1024,
     });
   } catch {
     return null;
   }
 }
 
-function parsePoems(raw, label) {
-  if (raw == null) return [];
+function parseJson(raw, label) {
+  if (raw == null) return null;
 
-  let parsed;
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch (error) {
     throw new Error(`Invalid JSON in ${label}: ${error.message}`);
   }
+}
+
+function parsePoems(raw, label) {
+  if (raw == null) return [];
+  const parsed = parseJson(raw, label);
 
   if (!Array.isArray(parsed)) {
     throw new Error(`${label} must be a JSON array`);
@@ -42,169 +44,123 @@ function stableStringify(value) {
   }
   if (value && typeof value === "object") {
     const keys = Object.keys(value).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }
 
-function extractJsonObject(text) {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const match = trimmed.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      return JSON.parse(match[0]);
-    } catch {
-      return null;
-    }
-  }
+function findNewOrChangedPoems(beforePoems, afterPoems) {
+  const beforeFingerprints = new Set(beforePoems.map((poem) => stableStringify(poem)));
+  return afterPoems.filter((poem) => !beforeFingerprints.has(stableStringify(poem)));
 }
 
-async function fetchDeathYear(client, author) {
-  const userPrompt = `What year did ${author} die? Reply with ONLY a JSON object like: {\"death_year\": 1902} or {\"death_year\": null} if unknown or still living.`;
-
-  const response = await client.chat.completions.create({
-    model: MODEL,
-    max_tokens: 128,
-    temperature: 0,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ],
-  });
-
-  const text = (response.choices[0].message.content ?? "");
-
-  const parsed = extractJsonObject(text);
-  if (!parsed || !("death_year" in parsed)) {
-    throw new Error(`Unexpected API response for author \"${author}\": ${text}`);
-  }
-
-  const { death_year: deathYear } = parsed;
-  if (deathYear === null) return null;
-
-  if (typeof deathYear === "number" && Number.isFinite(deathYear)) {
-    return Math.trunc(deathYear);
-  }
-
-  return null;
-}
-
-function findNewPoems(beforePoems, afterPoems) {
-  const beforeIds = new Set(
-    beforePoems
-      .map((p) => (p && typeof p === "object" ? p.id : undefined))
-      .filter((id) => typeof id === "string")
+function matchesCatalogRecord(poem, record) {
+  return ["body", "author", "year", "genre", "source", "source_url"].every(
+    (field) => poem?.[field] === record?.[field],
   );
-
-  const beforeFingerprints = new Set(beforePoems.map((p) => stableStringify(p)));
-
-  return afterPoems.filter((poem) => {
-    if (poem && typeof poem === "object" && typeof poem.id === "string") {
-      return !beforeIds.has(poem.id);
-    }
-    return !beforeFingerprints.has(stableStringify(poem));
-  });
 }
 
-async function main() {
+function verifyPoem(poem, catalogById) {
+  const id = poem?.id ?? null;
+  const sourceRecordId = poem?.source_record_id ?? null;
+  const record = typeof sourceRecordId === "string" ? catalogById.get(sourceRecordId) : null;
+
+  if (!record) {
+    return {
+      id,
+      author: poem?.author ?? null,
+      death_year: null,
+      status: "unknown",
+      is_public_domain: false,
+      reason: "Missing or unknown Aozora catalog record",
+    };
+  }
+
+  if (!matchesCatalogRecord(poem, record)) {
+    return {
+      id,
+      author: poem?.author ?? null,
+      death_year: record.death_year ?? null,
+      status: "unknown",
+      is_public_domain: false,
+      reason: "Poem fields do not match the referenced Aozora catalog record",
+    };
+  }
+
+  const deathYear = record.death_year;
+  const isPublicDomain = typeof deathYear === "number" && deathYear <= LATEST_PUBLIC_DOMAIN_DEATH_YEAR;
+
+  return {
+    id,
+    author: record.author ?? null,
+    death_year: deathYear ?? null,
+    status: isPublicDomain ? "public_domain" : "not_public_domain",
+    is_public_domain: isPublicDomain,
+    ...(isPublicDomain ? {} : { reason: "Author is not outside the configured copyright term" }),
+  };
+}
+
+function main() {
   const baseSha = process.env.GITHUB_BASE_SHA || "HEAD~1";
   const headSha = process.env.GITHUB_HEAD_SHA || "HEAD";
-  const apiKey = process.env.GITHUB_TOKEN;
-
-  const beforePoems = parsePoems(gitShow(baseSha), `${baseSha}:${FILE_PATH}`);
-  const afterRaw = gitShow(headSha);
+  const beforePoems = parsePoems(gitShow(baseSha, POEMS_PATH), `${baseSha}:${POEMS_PATH}`);
+  const afterRaw = gitShow(headSha, POEMS_PATH);
 
   if (afterRaw == null) {
-    throw new Error(`Could not read ${FILE_PATH} at ${headSha}`);
+    throw new Error(`Could not read ${POEMS_PATH} at ${headSha}`);
   }
 
-  const afterPoems = parsePoems(afterRaw, `${headSha}:${FILE_PATH}`);
-  const newPoems = findNewPoems(beforePoems, afterPoems);
+  const afterPoems = parsePoems(afterRaw, `${headSha}:${POEMS_PATH}`);
+  const newPoems = findNewOrChangedPoems(beforePoems, afterPoems);
 
   if (newPoems.length === 0) {
-    const result = {
-      ok: true,
-      all_passed: true,
+    console.log(
+      JSON.stringify({
+        ok: true,
+        all_passed: true,
+        base_sha: baseSha,
+        head_sha: headSha,
+        message: "No new poems were added.",
+        total_new_poems: 0,
+        checks: [],
+      }),
+    );
+    return;
+  }
+
+  const catalog = parseJson(gitShow(headSha, CATALOG_PATH), `${headSha}:${CATALOG_PATH}`);
+  if (!catalog || !Array.isArray(catalog.poems)) {
+    throw new Error(`Could not read a valid Aozora catalog at ${headSha}`);
+  }
+
+  const catalogById = new Map(
+    catalog.poems
+      .filter((record) => record && typeof record.source_record_id === "string")
+      .map((record) => [record.source_record_id, record]),
+  );
+  const checks = newPoems.map((poem) => verifyPoem(poem, catalogById));
+  const allPassed = checks.every((check) => check.is_public_domain === true);
+
+  console.log(
+    JSON.stringify({
+      ok: allPassed,
+      all_passed: allPassed,
       base_sha: baseSha,
       head_sha: headSha,
-      message: "No new poems were added.",
-      total_new_poems: 0,
-      checks: [],
-    };
-    console.log(JSON.stringify(result));
-    process.exit(0);
-  }
+      current_year: CURRENT_YEAR,
+      latest_death_year_for_pd: LATEST_PUBLIC_DOMAIN_DEATH_YEAR,
+      total_new_poems: newPoems.length,
+      checks,
+    }),
+  );
 
-  if (!apiKey) {
-    throw new Error("GITHUB_TOKEN is required when new poems are added");
-  }
-
-  const client = new OpenAI({ baseURL: "https://models.inference.ai.azure.com", apiKey });
-  const checks = [];
-
-  for (const poem of newPoems) {
-    const author = poem?.author ?? null;
-    const id = poem?.id ?? null;
-
-    if (typeof author !== "string" || author.trim() === "") {
-      checks.push({
-        id,
-        author,
-        death_year: null,
-        status: "unknown",
-        is_public_domain: false,
-        reason: "Missing or invalid author field",
-      });
-      continue;
-    }
-
-    const deathYear = await fetchDeathYear(client, author.trim());
-
-    let status = "unknown";
-    let isPublicDomain = false;
-
-    if (deathYear !== null) {
-      isPublicDomain = CURRENT_YEAR - deathYear >= PUBLIC_DOMAIN_THRESHOLD_YEARS;
-      status = isPublicDomain ? "public_domain" : "not_public_domain";
-    }
-
-    checks.push({
-      id,
-      author: author.trim(),
-      death_year: deathYear,
-      status,
-      is_public_domain: isPublicDomain,
-    });
-  }
-
-  const allPassed = checks.every((c) => c.is_public_domain === true);
-
-  const result = {
-    ok: allPassed,
-    all_passed: allPassed,
-    base_sha: baseSha,
-    head_sha: headSha,
-    current_year: CURRENT_YEAR,
-    minimum_death_year_for_pd: CURRENT_YEAR - PUBLIC_DOMAIN_THRESHOLD_YEARS,
-    total_new_poems: newPoems.length,
-    checks,
-  };
-
-  console.log(JSON.stringify(result));
-  process.exit(allPassed ? 0 : 1);
+  process.exitCode = allPassed ? 0 : 1;
 }
 
-main().catch((error) => {
-  const result = {
-    ok: false,
-    all_passed: false,
-    error: error.message,
-    checks: [],
-  };
-  console.error(error);
-  console.log(JSON.stringify(result));
-  process.exit(1);
-});
+try {
+  main();
+} catch (error) {
+  console.error(error.message);
+  console.log(JSON.stringify({ ok: false, all_passed: false, error: error.message, checks: [] }));
+  process.exitCode = 1;
+}

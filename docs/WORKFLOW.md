@@ -1,149 +1,67 @@
-# 詩追加ワークフロー
+# 詩コンテンツの運用フロー
 
-このドキュメントは、Rester に詩を追加する際の自動化ワークフローを説明します。
-
-## 概要
-
-詩の追加は**手動**（プルリクエスト）と**自動**（スケジュール実行）の2通りあります。どちらの場合もマージ前にパブリックドメイン検証が自動で実行されます。
+Rester は青空文庫の公開ドメイン作品を、リポジトリ内の検証済みカタログから選んで表示します。外部の生成AIや推論APIは使いません。
 
 ```
-手動PR  ──┐
-           ├──► add-poem.yml（パブリックドメイン確認）──► 自動マージ
-自動選択 ──┘
+青空文庫の作品カードを人が確認
+              │
+              ▼
+content/aozora-catalog.json（来歴・没年付き）
+              │
+              ▼
+月次Action ──► app/src/data/poems.json（同数だけ置換）
+              │
+              ▼
+PRの全件検証 ──► 人の確認・マージ ──► Pages デプロイ
 ```
 
----
+## 月次の総入れ替え
 
-## 全自動フロー
+`.github/workflows/auto-replace-poems.yml` は毎月1日 09:00 JST（UTC 00:00）に動きます。手動では GitHub Actions の **Monthly Poem Rotation** から実行できます。
 
-### トリガー
+処理は次のとおりです。
 
-- **スケジュール**: 毎週月曜 09:00 UTC
-- **手動**: GitHub Actions UI から `workflow_dispatch` で実行（`genre` 入力で絞り込み可能: 俳句 / 短歌 / 詩 / any）
+1. `scripts/rotate-aozora-poems.mjs` が表示件数を100件に固定する。
+2. `content/aozora-catalog.json` から、没年が `実行年 - 71` 以下のレコードだけを対象にする。
+3. 現在表示中の `source_record_id` を除外し、作者ごとに1件ずつ巡回する決定的な順序で100件を選ぶ。10作者から各10件ずつ選ばれる。
+4. `poems.json` を100件で書き直す。旧データはすべて削除され、新100件だけが残る。
+5. `scripts/validate-poems.mjs` が全作品の ID・本文・作者・年・ジャンル・出典・図書カードURL・重複を検証する。
+6. 成功時だけ月次PRを作る。`content/` はフロントエンドに読み込まないため、Pages に公開される詩データは常に `poems.json` の同数だけで、ファイルサイズが増え続けない。
 
-### 処理の流れ
+選定の種は年月と再試行番号です。同じ月の最初の実行は再現可能で、形式検証に失敗した場合は候補セット全体を捨て、異なる再試行番号で最大3回選び直します。候補数の多い作者ほど選ばれやすくなる方式ではなく、作者単位のラウンドロビンで均等に選びます。
 
-```
-auto-add-poem.yml
-  1. リポジトリをチェックアウト
-  2. scripts/suggest-poem.mjs を実行
-       - app/src/data/poems.json を読み込む
-       - Claude Sonnet (claude-sonnet-4-6) に詩を提案させる
-           - プロンプト: まだコレクションにない パブリックドメインの詩を提案
-           - 著者は 1956年以前に没している必要がある
-       - 重複チェック（最大3回リトライ）
-       - 新しい詩を poems.json に追記
-  3. 詩が追加された場合:
-       - ブランチ作成: auto/add-poem-<タイムスタンプ>
-       - コミット: feat: <著者>「<本文の先頭8文字>」を追加
-       - プッシュして PR を作成（ラベル: auto-generated）
-  4. 追加されなかった場合:
-       - 理由を出力して正常終了
+## Pull Request での公開ドメイン検証
 
-  ↓ main ブランチへの PR が作成される
+`add-poem.yml` は `poems.json` が変わった全PRで `scripts/check-public-domain.mjs` を動かします。ID が月次で再利用されても、本文を含むレコード全体の差分で判定するため、総入れ替えの全件を検証します。
 
-add-poem.yml  （PR 作成に反応して起動）
-  1. scripts/check-public-domain.mjs を実行
-       - poems.json のベース SHA とヘッド SHA を比較
-       - 新規追加された詩ごとに Claude Haiku (claude-haiku-4-5-20251001) を呼び出す
-           - 質問: <著者> は何年に亡くなりましたか？
-       - 判定: 2026 - 没年 >= 70
-  2. PR にコメントで結果テーブルを投稿:
-       | 著者 | 没年 | ステータス |
-  3. すべての詩がパスした場合:
-       - ラベル追加: public-domain-verified
-       - 自動マージ実行: gh pr merge --squash --auto
-  4. 1件でも失敗した場合:
-       - ワークフローを失敗させてマージをブロック
-```
+各変更作品について、次をすべて確認します。
 
----
+- `source_record_id` がカタログに存在すること
+- 本文、作者、年、ジャンル、出典、`source_url` がカタログと完全に一致すること
+- カタログに記録された没年が `実行年 - 71` 以下であること
 
-## 手動フロー
+いずれかが失敗するとPRに結果をコメントします。`monthly-rotation` ラベルのPRでは、失敗したPRを閉じ、最大3セットまで月次Actionを再実行します。最後の失敗PRは確認用に残ります。検証に通った月次PRも自動マージせず、作品内容と出典は人が確認してからマージします。
 
-`app/src/data/poems.json` を直接編集して PR を作成します。自動フローと同様に `add-poem.yml` による検証が走ります。
+## 青空文庫の出典と扱い
 
-詩のスキーマや本文の書き方は [CONTRIBUTING.md](../CONTRIBUTING.md) を参照してください。
+青空文庫の[利用条件](https://www.aozora.gr.jp/guide/kijyunn.html)では、著作権が消滅した作品は複製・再配布・共有・形式変更が可能とされています。一方で、元資料や入力・校正者などの情報を残すよう求められています。そのためカタログと表示データの双方に作品カードURLを残します。
 
----
+青空文庫は作品カードURLを安定した参照先として案内しており、テキストファイルURLの末尾の番号は更新される場合があります。[FAQ](https://www.aozora.gr.jp/guide/aozora_bunko_faq.html)の説明に従い、PRレビューでは `source_url` の作品カードを一次資料として確認してください。
 
 ## 関連ファイル
 
 | ファイル | 役割 |
-|----------|------|
-| `.github/workflows/auto-add-poem.yml` | スケジュール実行による詩の選択と PR 作成 |
-| `.github/workflows/add-poem.yml` | パブリックドメイン検証と自動マージ |
-| `.github/workflows/validate.yml` | PR 時の JSON スキーマ検証 |
-| `scripts/suggest-poem.mjs` | Claude Sonnet を使って新しい詩を選択 |
-| `scripts/check-public-domain.mjs` | Claude Haiku を使って著者の没年を確認 |
-| `app/src/data/poems.json` | 詩データ |
+| --- | --- |
+| `content/aozora-catalog.json` | 青空文庫の来歴と没年を含む、非公開の選定用カタログ |
+| `scripts/import-aozora-catalog.mjs` | 初期カタログを青空文庫由来テキストから再作成する |
+| `scripts/rotate-aozora-poems.mjs` | カタログから同数を選び、表示用データを総入れ替えする |
+| `scripts/validate-poems.mjs` | 表示用データの全件形式を検証する |
+| `scripts/check-public-domain.mjs` | 変更レコードのカタログ一致と没年を検証する |
+| `.github/workflows/auto-replace-poems.yml` | 月次の総入れ替えPRを作成する |
+| `.github/workflows/add-poem.yml` | PRの公開ドメイン検証と失敗時の再実行を行う |
 
----
+## 必要なリポジトリ設定
 
-## 事前設定
-
-| 項目 | 内容 |
-|------|------|
-| `ANTHROPIC_API_KEY` | GitHub リポジトリの Secrets に登録（両スクリプトで必須） |
-| ブランチ保護ルール | `main` に「ステータスチェック必須」を設定すると `--auto` マージが有効になる |
-
-### ブランチ保護ルールの設定手順
-
-#### 1. 設定画面を開く
-
-```
-リポジトリ → Settings → Branches → Add branch ruleset
-```
-
-（古い UI の場合は「Add rule」）
-
-#### 2. 対象ブランチを指定
-
-- **Branch name pattern**: `main`
-
-#### 3. 以下の項目を有効にする
-
-| 設定項目 | 目的 |
-|----------|------|
-| **Require a pull request before merging** | 直接プッシュを防ぐ（推奨） |
-| **Require status checks to pass before merging** | `--auto` マージに必須 |
-| └ **Require branches to be up to date before merging** | 合わせて有効化を推奨 |
-
-#### 4. ステータスチェックの追加
-
-「Require status checks」を有効にしたら、検索ボックスで以下を追加:
-
-- `public-domain-check`（`add-poem.yml` のジョブ名）
-- `validate`（`validate.yml` のジョブ名）
-
-> **注意**: ステータスチェックは一度でもそのワークフローが実行されないと候補に表示されません。最初の PR を手動でマージした後に設定するのが確実です。
-
-#### 5. 保存
-
-**Create** または **Save changes** をクリック。
-
-### `--auto` マージの仕組み
-
-```
-gh pr merge --squash --auto
-    ↓
-「保留中」状態でマージ待機
-    ↓
-required status checks が全部グリーンになったら
-    ↓
-GitHub が自動でマージ実行
-```
-
-ブランチ保護ルールなしだと `--auto` は即時マージになってしまうため、パブリックドメイン検証が完了する前にマージされる可能性があります。
-
----
-
-## パブリックドメインの判定基準
-
-日本の著作権法では、著作者の没後 **70年以上** 経過した作品がパブリックドメインとなります。
-
-```
-2026 - 没年 >= 70  →  没年 <= 1955
-```
-
-没年が不明な場合は `⚠️ 不明` と表示され、マージがブロックされます。
+- `GH_PAT`: 自動作成PRが `pull_request` ワークフローを起動し、失敗時に月次Actionを再実行するための Fine-grained PAT。対象リポジトリに `Contents: Read and write`、`Pull requests: Read and write`、`Actions: Read and write` を付与する。
+- Actions の **Workflow permissions**: 書き込みを許可し、**Allow GitHub Actions to create and approve pull requests** を有効にする。
+- ブランチ保護: `main` に `public-domain-check` と `validate` を必須チェックとして設定する。
